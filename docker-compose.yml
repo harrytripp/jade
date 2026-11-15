@@ -23,9 +23,13 @@ services:
   grafana:
     image: grafana/grafana
     container_name: grafana
+    depends_on: [db]
     restart: unless-stopped
     environment:
       - GF_PLUGINS_PREINSTALL=grafana-postgresql-datasource
+    configs:
+      - source: grafana_datasource
+        target: /etc/grafana/provisioning/datasources/postgres.yml
     ports:
       - '3000:3000'
 
@@ -33,22 +37,37 @@ services:
     image: ghcr.io/harrytripp/jade:sha-9b6e3cf
     pull_policy: always
     container_name: jade
-
+    depends_on: [db]
     volumes:
-      - jade_store:/app/store # PostgreSQL database; survives redeploys
-
+      - postgres_data:/app/store
     # Default bridge network. Uses JADE_HTTP_PORT if set in your
     # environment (or .env file), otherwise defaults to 8090.
     ports:
       - "${JADE_HTTP_PORT:-8090}:8090"
-
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
-
     restart: unless-stopped
+
+configs:
+  grafana_datasource:
+    content: |
+      apiVersion: 1
+      datasources:
+        - name: Jade
+          type: postgres
+          uid: jade-pg
+          url: db:5432
+          user: grafana_ro
+          secureJsonData:
+            password: "${GRAFANA_DB_PASSWORD}"
+          jsonData:
+            database: jade
+            sslmode: disable
+          isDefault: true
+          editable: false
 
 volumes:
   postgres_data:
