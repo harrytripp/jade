@@ -1,0 +1,109 @@
+name: Build and Deploy Jade
+
+# Pull requests: check, test and build the image. Nothing is pushed or deployed.
+# Pushes to main: the same, then push the image and deploy it by committing
+# the new tag to docker-compose.yml.
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "docker-compose.yml" # the deploy commit below; also stops a deploy loop
+      - "**.md"              # docs-only changes don't restart production
+      - "docs/**"            # README images
+      - "LICENSE"
+      - ".gitignore"
+
+env:
+  IMAGE_NAME: ghcr.io/harrytripp/jade
+
+jobs:
+  build-test:
+    name: Build and test binary
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "Run gofmt on:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build -v ./...
+
+      - name: Test
+        run: go test -race -v ./...
+
+  docker:
+    name: Build image (push and deploy on main)
+    runs-on: ubuntu-latest
+    needs: build-test
+    permissions:
+      contents: write
+      packages: write
+    # One run at a time per branch, so two quick pushes to main can't race
+    # each other's deploy commit.
+    concurrency:
+      group: docker-${{ github.ref }}
+      cancel-in-progress: false
+    env:
+      DEPLOY: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set image tag
+        run: echo "IMAGE_TAG=sha-${GITHUB_SHA::7}" >> $GITHUB_ENV
+
+      - name: Log in to the Container registry
+        if: env.DEPLOY == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build (and push on main)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: ${{ env.DEPLOY == 'true' }}
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+            ${{ env.IMAGE_NAME }}:main
+
+      - name: Update image tag in compose
+        if: env.DEPLOY == 'true'
+        run: |
+          sed -i -E \
+            "s|image: ghcr.io/.*/jade:.*|image: $IMAGE_NAME:$IMAGE_TAG|" \
+            docker-compose.yml
+
+      - name: Commit deployment change
+        if: env.DEPLOY == 'true'
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+          git add docker-compose.yml
+          if git commit -m "Deploy $IMAGE_TAG"; then
+            # main may have moved while the image was building
+            git pull --rebase origin main
+            git push
+          else
+            echo "No changes"
+          fi
