@@ -1,53 +1,18 @@
 ## CI rewrites the image: line on every deploy to main, so don't edit that line by hand.
 services:
-  app:
-    image: ghcr.io/harrytripp/jade:sha-c39699d
-    pull_policy: always
-    container_name: jade
-
-    volumes:
-      - jade_store:/app/store # PostgreSQL database; survives redeploys
-
-    # Default bridge network. Uses JADE_HTTP_PORT if set in your
-    # environment (or .env file), otherwise defaults to 8090.
-    # Bind to "127.0.0.1:8090" to restrict access to localhost only.
-    # Since it lacks authentication, publish it externally only if
-    # your firewall or network restricts access to trusted clients.
-    ports:
-      - "${JADE_HTTP_PORT:-8090}:8090"
-
-    # Hardening. The process runs as an unprivileged user (see Dockerfile)
-    # and needs no Linux capabilities. read_only isn't set because Compose
-    # can't inject a `content:` config into a read-only container.
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-    restart: unless-stopped
-    # On SIGTERM the app finishes any write in progress, closes the database
-    # and exits. That takes a few seconds at most, well inside this limit.
-    stop_grace_period: 60s
-
   db:
     image: postgres
+    container_name: postgres
     restart: always
-    # set shared memory limit when using docker compose
-    shm_size: 128mb
-    # or set shared memory limit when deploy via swarm stack
-    #volumes:
-    #  - type: tmpfs
-    #    target: /dev/shm
-    #    tmpfs:
-    #      size: 134217728 # 128*2^20 bytes = 128Mb
     environment:
       POSTGRES_PASSWORD: example
+      TZ: Europe/London
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    ports:
+      - "127.0.0.1:5432:5432"
 
   adminer:
     image: adminer
@@ -59,8 +24,31 @@ services:
     image: grafana/grafana
     container_name: grafana
     restart: unless-stopped
+    environment:
+      - GF_PLUGINS_PREINSTALL=grafana-postgresql-datasource
     ports:
       - '3000:3000'
 
+  app:
+    image: ghcr.io/harrytripp/jade:sha-c39699d
+    pull_policy: always
+    container_name: jade
+
+    volumes:
+      - jade_store:/app/store # PostgreSQL database; survives redeploys
+
+    # Default bridge network. Uses JADE_HTTP_PORT if set in your
+    # environment (or .env file), otherwise defaults to 8090.
+    ports:
+      - "${JADE_HTTP_PORT:-8090}:8090"
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    restart: unless-stopped
+
 volumes:
-  jade_store:
+  postgres_data:
