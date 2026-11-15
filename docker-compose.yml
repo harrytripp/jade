@@ -30,7 +30,7 @@ services:
       - '3000:3000'
 
   app:
-    image: ghcr.io/harrytripp/jade:sha-c39699d
+    image: ghcr.io/harrytripp/jade:sha-9b6e3cf
     pull_policy: always
     container_name: jade
 
