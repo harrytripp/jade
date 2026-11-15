@@ -1,7 +1,7 @@
 ## CI rewrites the image: line on every deploy to main, so don't edit that line by hand.
 services:
   app:
-    image: ghcr.io/harrytripp/jade:sha-100000a
+    image: ghcr.io/harrytripp/jade:sha-4eb262f
     pull_policy: always
     container_name: jade
 
